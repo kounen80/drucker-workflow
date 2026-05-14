@@ -1,0 +1,396 @@
+================================================================
+  DRUCKWORKFLOW - Installation auf einem neuen Windows-PC
+================================================================
+
+Diese Anleitung beschreibt Schritt fuer Schritt, wie du den
+Druckworkflow auf einem neuen Rechner einrichtest.
+
+Geschaetzte Dauer: 15-20 Minuten.
+
+
+INHALT
+  1. Python installieren
+  2. Druckworkflow-Ordner an die richtige Stelle kopieren
+  3. Python-Pakete installieren
+  4. Erster Testlauf
+  5. Konfiguration anpassen
+  6. Fiery-Hot-Folder vorbereiten (wichtig!)
+  7. Echte Druckordner aktivieren
+  8. Cleaning / Reset
+  9. Autostart einrichten
+  10. Troubleshooting
+
+
+----------------------------------------------------------------
+SCHRITT 1: Python installieren
+----------------------------------------------------------------
+
+1. Im Browser oeffnen:  https://www.python.org/downloads/
+2. Auf "Download Python 3.x" klicken (gelber Knopf).
+3. Heruntergeladene Datei ausfuehren.
+4. WICHTIG: Im Installer ganz unten den Haken setzen bei
+       [x] Add python.exe to PATH
+   (sonst funktionieren spaeter die Befehle nicht)
+5. "Install Now" klicken und warten.
+
+Pruefen:
+- Windows-Taste druecken, "PowerShell" eingeben, oeffnen.
+- Im Fenster eingeben:    py --version
+- Es muss eine Versionsnummer erscheinen (z.B. "Python 3.12.4").
+
+
+----------------------------------------------------------------
+SCHRITT 2: Druckworkflow-Ordner kopieren
+----------------------------------------------------------------
+
+1. Den kompletten Ordner Druckworkflow vom alten PC nach
+       C:\Druckworkflow
+   auf den neuen PC kopieren.
+
+   Wichtig: der Pfad muss EXAKT  C:\Druckworkflow  sein,
+   sonst stimmen die Pfade im Skript nicht.
+
+2. Falls du nur die noetigsten Dateien kopieren willst, reichen:
+       C:\Druckworkflow\Installation\           (dieser Ordner)
+       C:\Druckworkflow\druckworkflow.py        (Hauptskript)
+   Alle anderen Unterordner (01_Eingang, 04_Erledigt, logs ...)
+   werden beim ersten Start automatisch angelegt.
+
+3. Optional: Wenn die fortlaufende Nummerierung weiterzaehlen
+   soll, auch  C:\Druckworkflow\counter.txt  mitkopieren.
+
+
+----------------------------------------------------------------
+SCHRITT 3: Benoetigte Python-Pakete installieren
+----------------------------------------------------------------
+
+1. Doppelklick auf:
+       C:\Druckworkflow\Installation\install_pakete.bat
+
+   Es oeffnet sich ein schwarzes Fenster und installiert
+   PyMuPDF und watchdog. Wenn am Ende
+       "Pakete erfolgreich installiert"
+   steht, ist alles gut.
+
+2. Falls der Doppelklick nicht funktioniert: PowerShell oeffnen
+   und manuell ausfuehren:
+       py -m pip install --upgrade pip
+       py -m pip install pymupdf watchdog
+
+
+----------------------------------------------------------------
+SCHRITT 4: Erster Testlauf
+----------------------------------------------------------------
+
+1. Doppelklick auf:
+       C:\Druckworkflow\Installation\start_druckworkflow.bat
+
+2. Es oeffnet sich ein Fenster mit Meldungen wie:
+       Druckworkflow gestartet. Eingang: C:\Druckworkflow\01_Eingang
+       Ueberwachung laeuft. Mit Strg+C beenden.
+
+3. Test-PDF (mindestens 3 Seiten, fuer den vollen Test besser
+   die typischen 30+ Seiten eines Angebotsvorgangs) in
+       C:\Druckworkflow\01_Eingang
+   ablegen.
+
+4. Im Fenster verfolgen, was passiert. Nach kurzer Zeit liegen
+   die fertigen Dateien in:
+       C:\Druckworkflow\TEST_Antrag\antragNNN.pdf
+       C:\Druckworkflow\TEST_Broschuere\broschuereNNN.pdf
+   und das Original in:
+       C:\Druckworkflow\04_Erledigt\
+
+5. Beenden mit Strg+C im Fenster.
+
+
+HINWEIS zur Verarbeitungs-Reihenfolge:
+
+Das Skript arbeitet die Dateien IMMER in der Reihenfolge ab, in
+der sie in 01_Eingang abgelegt wurden (aelteste zuerst). Auch
+wenn du 10 PDFs auf einmal hineinkopierst, werden sie streng
+nacheinander durchgearbeitet:
+
+   1. PDF -> antrag001.pdf + broschuere001.pdf
+   2. PDF -> antrag002.pdf + broschuere002.pdf
+   ...
+
+So entstehen zwei sortierte Stapel im Drucker:
+   Antrag-Stapel:    001, 002, 003, ... (in deiner Eingangsreihenfolge)
+   Broschuere-Stapel: 001, 002, 003, ... (gleiche Reihenfolge)
+
+Beim Verpacken paarst du einfach Antrag001 + Broschuere001 usw.
+- gleiche Nummer = gleicher Kunde.
+
+
+----------------------------------------------------------------
+SCHRITT 5: Konfiguration anpassen
+----------------------------------------------------------------
+
+Im Hauptskript  C:\Druckworkflow\druckworkflow.py  stehen oben
+alle Konfigurationsoptionen. Datei in einem Editor oeffnen
+(Notepad, Notepad++ oder VS Code). Die wichtigsten Werte:
+
+ANTRAG (A4 Farbe)
+  ANTRAG_START_PAGE = 2
+  ANTRAG_END_PAGE   = 3
+      -> welche Seiten den Antrag bilden (typisch 2-3).
+
+  RASTERIZE_ANTRAG    = True
+  ANTRAG_DPI          = 300
+  ANTRAG_JPG_QUALITY  = 92
+      -> Antrag wird als 300-dpi-JPEG eingebettet. WICHTIG -
+         nicht ausschalten, sonst kommen Fiery-Druckprobleme
+         zurueck (siehe Troubleshooting).
+
+BROSCHUERE (A3 Booklet, ab S.4 Graustufen)
+  BROSCHUERE_REMOVE_PAGES = [2, 3]
+      -> Antragsseiten werden aus der Broschuere entfernt.
+
+  BROSCHUERE_SWAP_RANGES = [((2, 3), (4, 5))]
+      -> Seitenvertausch nach dem Entfernen. Tauscht in der
+         bereinigten Broschuere die Seiten 2-3 mit 4-5.
+         Leere Liste [] = keine Vertauschung.
+
+  CONVERT_BROSCHUERE_TO_GRAYSCALE = True
+  GRAYSCALE_FROM_PAGE       = 4
+  GRAYSCALE_DPI             = 180
+  GRAYSCALE_JPG_QUALITY     = 82
+      -> ab Seite 4 wird die Broschuere in Graustufen umgewandelt
+         (spart Farbtoner). 180 dpi / Qualitaet 82 ist guter
+         Kompromiss zwischen Dateigroesse und Druckqualitaet.
+         Bei Bedarf hoeher setzen (z.B. 220/88).
+
+LOGO-OVERLAY auf Seite 1 der Broschuere
+  ADD_LOGO_TO_PAGE1 = True
+  LOGO_SOURCE_PAGE  = 6
+  LOGO_SOURCE_RECT  = (390, 60, 540, 110)
+  LOGO_TARGET_RECT  = (390, 270, 560, 320)
+  LOGO_DPI          = 300
+      -> holt das Logo von Seite N aus dem Original und legt es
+         oben rechts auf Seite 1 der Broschuere.
+         Koordinaten in PDF-Punkten, 1 mm = ca. 2.83 Punkte.
+
+NUMMERIERUNG
+  ANTRAG_PREFIX     = "antrag"
+  BROSCHUERE_PREFIX = "broschuere"
+  COUNTER_DIGITS    = 3        -> antrag001.pdf usw.
+
+Nach jeder Aenderung Skript neu starten.
+
+
+----------------------------------------------------------------
+SCHRITT 6: Fiery-Hot-Folder vorbereiten (WICHTIG!)
+----------------------------------------------------------------
+
+Diese Schritte verhindern, dass die selbe PDF mehrfach gedruckt
+wird (haeufiges Problem!). Auf dem Fiery-Rechner ausfuehren:
+
+1. Programm "Fiery Hot Folders" starten (Konsole).
+2. Bei jedem Hot-Folder (Antrag und Broschuere) im Menue
+       Bearbeiten -> Voreinstellungen
+   das Abrufintervall pruefen:
+       - Standard ist 10 Sekunden, das ist zu kurz.
+       - Auf 60-120 Sekunden hochsetzen.
+
+3. Eigenschaften des jeweiligen Hot-Folders pruefen
+   (Bearbeiten...):
+       - Eingabeordner: "Originaldateien sichern in:" muss
+         AKTIV sein und auf einen Unterordner zeigen (Standard:
+         "Original Files"). Sonst bleibt die Datei im
+         Eingangsordner und wird mehrfach gedruckt.
+       - Auftragseigenschaften: Anzahl Kopien = 1.
+
+WICHTIGER HINTERGRUND zum Rasterungs-Fix:
+
+Das Skript betten die Antrags- und Graustufenseiten bewusst als
+JPEG (DCTDecode) ein, nicht als verlustfreies Flate-PDF mit
+ICCBased-Farbprofil. Grund:
+
+- ICCBased + FlateDecode loest beim Fiery-RIP einen
+  Color-Management-Pfad aus, der den selben Job mehrfach durch
+  die Engine schickt -> 3-5 Drucke aus einer Datei.
+- Mit JPEG/DCTDecode druckt der Fiery genau 1x.
+
+NICHT auf FlateDecode/Pixmap zurueckaendern, auch wenn die Datei
+kleiner werden wuerde.
+
+
+----------------------------------------------------------------
+SCHRITT 7: Echte Druckordner aktivieren
+----------------------------------------------------------------
+
+Solange im Skript die TEST_*-Pfade stehen, geht nichts an den
+Drucker. Sobald alles funktioniert:
+
+1. C:\Druckworkflow\druckworkflow.py in Editor oeffnen.
+
+2. Oben die Zeilen suchen:
+
+       # --- TEST-MODUS: zeigt auf lokale Testordner ---
+       ANTRAG_DRUCKORDNER     = r"C:\Druckworkflow\TEST_Antrag"
+       BROSCHUERE_DRUCKORDNER = r"C:\Druckworkflow\TEST_Broschuere"
+       # --- ECHTE Pfade ---
+       # ANTRAG_DRUCKORDNER     = r"\\SERVER\Druck\Antrag_A4_Duplex"
+       # BROSCHUERE_DRUCKORDNER = r"\\SERVER\Druck\Broschuere_A3"
+
+3. Die TEST-Zeilen mit # auskommentieren, die ECHTEN Zeilen
+   aktivieren (# vorne entfernen). UNC-Pfade an die echten
+   Hot-Folder-Namen anpassen.
+
+4. Speichern und start_druckworkflow.bat neu starten.
+
+WICHTIG: Der angemeldete Windows-Benutzer muss Schreibrechte
+auf die Hot-Folder haben (vorher im Explorer mit \\SERVER\...
+in der Adresszeile pruefen).
+
+
+----------------------------------------------------------------
+SCHRITT 8: Cleaning / Reset
+----------------------------------------------------------------
+
+Falls du alle Workflow-Ordner und Logs zuruecksetzen willst
+(z.B. nach Testphase):
+
+1. Skript stoppen (Strg+C im Fenster).
+2. Doppelklick auf:
+       C:\Druckworkflow\cleaning_starten.bat
+3. Mit "j" bestaetigen.
+
+Geloescht werden:
+   01_Eingang, 02_InArbeit, 04_Erledigt, 99_Fehler,
+   TEST_Antrag, TEST_Broschuere, logs, counter.txt
+Erhalten bleiben:
+   druckworkflow.py, Installation, Beispiel, vergleich
+
+
+----------------------------------------------------------------
+SCHRITT 9: Autostart einrichten (Aufgabenplanung)
+----------------------------------------------------------------
+
+Damit das Skript beim Hochfahren des PCs automatisch laeuft:
+
+1. Windows-Taste, "Aufgabenplanung" eingeben, oeffnen.
+2. Rechts auf "Aufgabe erstellen ..." (NICHT "einfache").
+3. Reiter ALLGEMEIN:
+   - Name: Druckworkflow
+   - [x] Unabhaengig von der Benutzeranmeldung ausfuehren
+   - [x] Mit hoechsten Privilegien ausfuehren
+4. Reiter TRIGGER -> Neu...
+   - Aufgabe starten: Bei Anmeldung  (oder: Beim Start)
+   - OK
+5. Reiter AKTIONEN -> Neu...
+   - Aktion: Programm starten
+   - Programm/Skript:   py
+   - Argumente:         C:\Druckworkflow\druckworkflow.py
+   - Starten in:        C:\Druckworkflow
+   - OK
+6. Reiter EINSTELLUNGEN:
+   - [x] Aufgabe bei Bedarf ausfuehren
+   - [x] So schnell wie moeglich nach einem verpassten Start
+   - Bei Fehlschlag neu starten alle: 1 Minute, 3 Versuche
+7. OK, Passwort des aktuellen Benutzers eingeben.
+
+Hinweis: Wenn die Hot-Folder UNC-Pfade sind, muss die Aufgabe
+unter einem Benutzer laufen, der das Netzlaufwerk sieht. Nicht
+unter SYSTEM.
+
+
+----------------------------------------------------------------
+SCHRITT 10: Troubleshooting
+----------------------------------------------------------------
+
+Problem: "Druckordner nicht erreichbar: C:\Druckworkflow\TEST_Antrag"
+         (oder TEST_Broschuere), PDF landet sofort in 99_Fehler.
+Loesung: Die TEST-Druckordner muessen existieren. Aktuelle
+         druckworkflow.py legt sie beim Start automatisch an.
+         Falls Fehler trotzdem: Skript-Stand pruefen (sollte den
+         Block "Druckordner ebenfalls anlegen, falls lokal" oben
+         enthalten). Alternativ einmalig manuell anlegen:
+             mkdir C:\Druckworkflow\TEST_Antrag
+             mkdir C:\Druckworkflow\TEST_Broschuere
+
+Problem: PDF wird beim Fiery mehrfach gedruckt (2-5x).
+Loesung: Siehe Schritt 6:
+         - Abrufintervall des Hot-Folders auf 60-120 s setzen.
+         - "Originaldateien sichern in:" aktivieren.
+         - Pruefen, dass Skript JPEG (DCTDecode) erzeugt, nicht
+           FlateDecode (siehe Hintergrund in Schritt 6).
+
+Problem: Antrag wird teils blass gedruckt, manche Stellen
+         dunkler.
+Loesung: RASTERIZE_ANTRAG muss True sein. Der Antrag muss als
+         300-dpi-JPEG eingebettet werden, damit der Fiery die
+         Transparenzen aus dem Original nicht selbst rendert.
+
+Problem: "IndentationError: unexpected indent" beim Start.
+Loesung: Datei wurde irgendwo mit zusaetzlichen Leerzeichen
+         versehen (oft beim Kopieren aus Word/Chat).
+         Originaldatei vom alten PC neu kopieren.
+
+Problem: Doppelklick auf start_druckworkflow.bat -> Fenster
+         geht sofort wieder zu.
+Loesung: PowerShell oeffnen und manuell starten:
+             py C:\Druckworkflow\druckworkflow.py
+         Dort siehst du die Fehlermeldung.
+
+Problem: PDF landet in 99_Fehler.
+Loesung: Logdatei oeffnen:
+             C:\Druckworkflow\logs\druckworkflow_YYYY-MM.log
+         Haeufige Ursache: PDF hat weniger als 3 Seiten (es
+         braucht mindestens die Seiten 1, 2, 3, weil 2-3 fuer
+         den Antrag extrahiert werden).
+
+Problem: "Druckordner nicht erreichbar".
+Loesung: \\SERVER\Druck\... im Explorer aufrufen. Wenn der
+         Explorer den Pfad auch nicht oeffnen kann, fehlen
+         Netzwerk- oder Berechtigungen.
+
+Problem: Logo-Position passt nicht oder Logo erscheint nicht.
+Loesung: LOGO_SOURCE_PAGE pruefen - muss auf eine Seite zeigen,
+         auf der das Logo physisch existiert. Bei
+         unterschiedlich langen Auftraegen ggf. anpassen.
+         Wenn Quellseite nicht existiert, ueberspringt das
+         Skript das Logo und schreibt eine Warnung ins Log.
+         LOGO_TARGET_RECT  = (x_links, y_oben, x_rechts, y_unten)
+         in PDF-Punkten. 1 mm = ca. 2.83 Punkte.
+
+Problem: Broschuere ist sehr gross (15-25 MB).
+Loesung: Normal bei rasterten PDFs. Original-Vektor war klein,
+         aber Rasterung ist Pflicht (siehe Druckprobleme).
+         Wer kleiner braucht: GRAYSCALE_DPI senken (z.B. 150)
+         oder GRAYSCALE_JPG_QUALITY senken (z.B. 78). Wird
+         weicher, bleibt aber lesbar.
+
+
+----------------------------------------------------------------
+WICHTIGE DATEIEN UND ORDNER (Uebersicht)
+----------------------------------------------------------------
+
+  C:\Druckworkflow\
+    druckworkflow.py        <- Hauptskript (hier konfigurieren)
+    counter.txt             <- naechste Auftragsnummer
+    cleaning_starten.bat    <- raeumt alle Ordner auf
+    01_Eingang\             <- HIER PDFs ablegen
+    02_InArbeit\            <- temporaer waehrend Verarbeitung
+    04_Erledigt\            <- Originale nach Erfolg
+    99_Fehler\              <- Originale bei Fehlern
+    logs\                   <- Logdateien
+    TEST_Antrag\            <- nur fuer Tests
+    TEST_Broschuere\        <- nur fuer Tests
+    Installation\           <- Anleitung + Hilfsdateien
+    Beispiel\               <- Beispiel-PDFs (optional)
+    vergleich\              <- PDF-Analyse-Skripte (optional)
+
+
+----------------------------------------------------------------
+BEI PROBLEMEN
+----------------------------------------------------------------
+
+Konrad Diessl
+konrad.diessl@test-zahnzusatzversicherung.de
+
+Logdatei mitschicken:
+  C:\Druckworkflow\logs\druckworkflow_YYYY-MM.log
+
+================================================================

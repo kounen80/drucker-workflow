@@ -1,0 +1,54 @@
+================================================================
+  WILLKOMMEN - Druckworkflow Installation
+================================================================
+
+In diesem Ordner findest du alles, was du brauchst, um den
+Druckworkflow auf einem neuen Windows-PC einzurichten.
+
+
+WAS DAS SKRIPT MACHT (Kurzfassung)
+
+- Es ueberwacht den Ordner C:\Druckworkflow\01_Eingang.
+- Jede dort abgelegte Original-PDF wird aufgeteilt in:
+    * antragNNN.pdf       (Seiten 2-3, A4 Farbe, als 300-dpi-JPEG
+                           gerastert)
+    * broschuereNNN.pdf   (Rest, A3 Broschuere, ab Seite 4 in
+                           Graustufen 180 dpi, Logo-Overlay auf
+                           Seite 1)
+- Beide gehen in die Fiery-Hot-Folder. Original wandert nach
+  04_Erledigt, Fehler nach 99_Fehler.
+
+
+SCHRITTE IN KURZFORM
+
+  1. Python installieren:  https://www.python.org/downloads/
+     (im Installer Haken bei "Add python.exe to PATH" setzen)
+
+  2. Diesen Ordner nach C:\Druckworkflow kopieren
+
+  3. Doppelklick auf:       install_pakete.bat
+     (installiert die noetigen Python-Pakete)
+
+  4. Doppelklick auf:       start_druckworkflow.bat
+     (startet den Workflow zum Testen)
+
+
+AUSFUEHRLICHE ANLEITUNG mit allen Details, Konfiguration,
+Autostart, Fiery-Hot-Folder-Einstellungen und Troubleshooting
+steht in der Datei:
+
+       INSTALLATION.txt
+
+Bitte vor der ersten Einrichtung einmal komplett lesen.
+
+
+DATEIEN IN DIESEM ORDNER
+
+  LIESMICH_ZUERST.txt       <- diese Datei
+  INSTALLATION.txt          <- ausfuehrliche Anleitung
+  druckworkflow.py          <- Hauptskript
+  install_pakete.bat        <- installiert PyMuPDF und watchdog
+  start_druckworkflow.bat   <- startet den Workflow
+  cleaning_starten.bat      <- raeumt alle Workflow-Ordner auf
+
+================================================================
