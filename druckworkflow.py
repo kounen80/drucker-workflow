@@ -14,7 +14,9 @@ import logging
 import traceback
 from pathlib import Path
 
+import io
 import fitz  # PyMuPDF
+from PIL import Image
 
 # ============================================================
 # KONFIGURATION - hier alles anpassen
@@ -62,9 +64,9 @@ GRAYSCALE_FROM_PAGE = 4
 GRAYSCALE_DPI = 180
 GRAYSCALE_JPG_QUALITY = 82
 
-# Farb-Seiten (Anschreiben + Leistungen) als CMYK-JPEG einbetten.
-# CMYK-Ausgabe: der Fiery muss keine RGB->CMYK-Konvertierung mehr durchfuehren,
-# kräftige Farben (z.B. Gruen auf den Leistungsseiten) bleiben beim Druck erhalten.
+# Farb-Seiten (Anschreiben + Leistungen) als CMYK-JPEG einbetten (via Pillow).
+# Pillow konvertiert RGB->CMYK korrekt (PyMuPDF csCMYK invertiert die Werte).
+# CMYK-Ausgabe: der Fiery muss nicht konvertieren -> kraeftiges Gruen bleibt erhalten.
 RASTERIZE_COLOR_PAGES = True
 COLOR_DPI = 250
 COLOR_JPG_QUALITY = 92
@@ -316,8 +318,11 @@ def build_broschuere(src_pdf: Path, out_pdf: Path, antrag_pages: int) -> None:
                     np_page = new.new_page(width=rect.width, height=rect.height)
                     np_page.insert_image(rect, stream=jpg_bytes)
                 elif i < gs_start_idx and RASTERIZE_COLOR_PAGES:
-                    pix = page.get_pixmap(dpi=COLOR_DPI, colorspace=fitz.csCMYK)
-                    jpg_bytes = pix.tobytes("jpg", jpg_quality=COLOR_JPG_QUALITY)
+                    pix = page.get_pixmap(dpi=COLOR_DPI)
+                    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                    buf = io.BytesIO()
+                    img.convert("CMYK").save(buf, format="JPEG", quality=COLOR_JPG_QUALITY)
+                    jpg_bytes = buf.getvalue()
                     rect = page.rect
                     np_page = new.new_page(width=rect.width, height=rect.height)
                     np_page.insert_image(rect, stream=jpg_bytes)
