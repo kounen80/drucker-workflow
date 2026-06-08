@@ -10,8 +10,10 @@ import re
 import sys
 import time
 import shutil
+import signal
 import logging
 import traceback
+import subprocess
 import urllib.request
 from pathlib import Path
 
@@ -541,12 +543,30 @@ def self_update() -> None:
     log.info("Auto-Update: neue Version installiert (Backup: %s). Neustart ...",
              backup.name)
     os.environ["DRUCKWORKFLOW_UPDATED"] = "1"
+    # KEIN os.execv: ersetzt auf Windows den Prozess nicht, sondern startet einen
+    # neuen und beendet den alten sofort -> die aufrufende .bat laeuft dann
+    # parallel zur neuen Instanz und beide streiten sich um die Konsole
+    # (Tastendruecke gehen verloren). Stattdessen die neue Version als
+    # Unterprozess starten und auf ihr Ende warten. Waehrenddessen ignoriert der
+    # Eltern-Prozess Strg+C, damit nur die laufende (Kind-)Instanz es behandelt
+    # und der Elternprozess nicht vorzeitig endet.
     try:
-        os.execv(sys.executable, [sys.executable, str(target)] + sys.argv[1:])
+        old = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except (ValueError, OSError):
+        old = None
+    try:
+        ret = subprocess.run([sys.executable, str(target)] + sys.argv[1:]).returncode
     except OSError as e:
         log.error("Neustart nach Update fehlgeschlagen: %s - bitte manuell neu "
                   "starten.", e)
-        sys.exit(1)
+        ret = 1
+    finally:
+        if old is not None:
+            try:
+                signal.signal(signal.SIGINT, old)
+            except (ValueError, OSError):
+                pass
+    sys.exit(ret)
 
 
 def _print_bereit() -> None:
@@ -567,6 +587,10 @@ def _warte_auf_taste(prompt: str) -> None:
     print(prompt, end="", flush=True)
     try:
         import msvcrt
+        # Evtl. gepufferte Tasten (z.B. waehrend der Verarbeitung getippt)
+        # verwerfen, damit wir auf einen frischen Tastendruck warten.
+        while msvcrt.kbhit():
+            msvcrt.getch()
         msvcrt.getch()
         print()
     except Exception:
