@@ -68,14 +68,14 @@ SCHRITT 3: Benoetigte Python-Pakete installieren
        C:\Druckworkflow\Installation\install_pakete.bat
 
    Es oeffnet sich ein schwarzes Fenster und installiert
-   PyMuPDF und watchdog. Wenn am Ende
+   PyMuPDF und Pillow. Wenn am Ende
        "Pakete erfolgreich installiert"
    steht, ist alles gut.
 
 2. Falls der Doppelklick nicht funktioniert: PowerShell oeffnen
    und manuell ausfuehren:
        py -m pip install --upgrade pip
-       py -m pip install pymupdf watchdog
+       py -m pip install pymupdf pillow
 
 
 ----------------------------------------------------------------
@@ -132,9 +132,12 @@ alle Konfigurationsoptionen. Datei in einem Editor oeffnen
 (Notepad, Notepad++ oder VS Code). Die wichtigsten Werte:
 
 ANTRAG (A4 Farbe)
-  ANTRAG_START_PAGE = 2
-  ANTRAG_END_PAGE   = 3
-      -> welche Seiten den Antrag bilden (typisch 2-3).
+  ANTRAG_START_PAGE     = 2
+  ANTRAG_PAGES_FALLBACK = 2
+      -> Der Antrag beginnt auf Seite 2. Die Laenge (2 oder 3
+         Seiten) wird automatisch erkannt (Pixel-Vergleich von
+         Seite 2 und 4). ANTRAG_PAGES_FALLBACK greift nur, wenn
+         die Auto-Erkennung nicht moeglich ist (PDF < 5 Seiten).
 
   RASTERIZE_ANTRAG    = True
   ANTRAG_DPI          = 300
@@ -144,13 +147,19 @@ ANTRAG (A4 Farbe)
          zurueck (siehe Troubleshooting).
 
 BROSCHUERE (A3 Booklet, ab S.4 Graustufen)
-  BROSCHUERE_REMOVE_PAGES = [2, 3]
-      -> Antragsseiten werden aus der Broschuere entfernt.
+      -> Welche Seiten den Antrag bilden und in welcher
+         Reihenfolge die Broschuere zusammengesetzt wird, leitet
+         das Skript automatisch aus der erkannten Antragslaenge
+         ab. Hier ist keine statische Konfiguration mehr noetig
+         (frueher: BROSCHUERE_REMOVE_PAGES / BROSCHUERE_SWAP_RANGES).
 
-  BROSCHUERE_SWAP_RANGES = [((2, 3), (4, 5))]
-      -> Seitenvertausch nach dem Entfernen. Tauscht in der
-         bereinigten Broschuere die Seiten 2-3 mit 4-5.
-         Leere Liste [] = keine Vertauschung.
+  RASTERIZE_COLOR_PAGES = True
+  COLOR_DPI             = 250
+  COLOR_JPG_QUALITY     = 92
+      -> Die Farbseiten (Anschreiben + Leistungen) werden als
+         CMYK-JPEG eingebettet (via Pillow). So muss der Fiery
+         nicht selbst konvertieren - kraeftige Farben bleiben
+         erhalten.
 
   CONVERT_BROSCHUERE_TO_GRAYSCALE = True
   GRAYSCALE_FROM_PAGE       = 4
@@ -163,12 +172,13 @@ BROSCHUERE (A3 Booklet, ab S.4 Graustufen)
 
 LOGO-OVERLAY auf Seite 1 der Broschuere
   ADD_LOGO_TO_PAGE1 = True
-  LOGO_SOURCE_PAGE  = 6
   LOGO_SOURCE_RECT  = (390, 60, 540, 110)
   LOGO_TARGET_RECT  = (390, 270, 560, 320)
   LOGO_DPI          = 300
-      -> holt das Logo von Seite N aus dem Original und legt es
-         oben rechts auf Seite 1 der Broschuere.
+      -> holt das Logo aus dem Original und legt es oben rechts
+         auf Seite 1 der Broschuere. Die Quellseite wird
+         automatisch aus der Antragslaenge berechnet
+         (antrag_pages * 2 + 2), daher kein LOGO_SOURCE_PAGE mehr.
          Koordinaten in PDF-Punkten, 1 mm = ca. 2.83 Punkte.
 
 NUMMERIERUNG

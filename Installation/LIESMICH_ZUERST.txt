@@ -47,7 +47,7 @@ DATEIEN IN DIESEM ORDNER
   LIESMICH_ZUERST.txt       <- diese Datei
   INSTALLATION.txt          <- ausfuehrliche Anleitung
   druckworkflow.py          <- Hauptskript
-  install_pakete.bat        <- installiert PyMuPDF und watchdog
+  install_pakete.bat        <- installiert PyMuPDF und Pillow
   start_druckworkflow.bat   <- startet den Workflow
   cleaning_starten.bat      <- raeumt alle Workflow-Ordner auf
 
