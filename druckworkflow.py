@@ -449,6 +449,25 @@ def main():
     log.info("Ueberwachung laeuft. Mit Strg+C beenden.")
 
     try:
+        # Vorhandene Dateien im Eingang zuerst abarbeiten
+        while True:
+            f = next_input_file()
+            if f is None:
+                break
+            try:
+                process(f)
+            except Exception as e:
+                log.error("Unerwarteter Fehler: %s", e)
+                log.error(traceback.format_exc())
+
+        print()
+        print("=" * 60)
+        print("  BEREIT - Druckworkflow laeuft.")
+        print("  Neue Dateien werden automatisch verarbeitet.")
+        print("  Zum Beenden: Strg+C druecken.")
+        print("=" * 60)
+        print()
+
         while True:
             f = next_input_file()
             if f is not None:
@@ -460,7 +479,12 @@ def main():
             else:
                 time.sleep(2)
     except KeyboardInterrupt:
-        log.info("Beende ...")
+        print()
+        print("=" * 60)
+        print("  Druckworkflow beendet.")
+        print("=" * 60)
+        print()
+        input("  Druecken Sie eine beliebige Taste zum Schliessen ...")
 
 
 if __name__ == "__main__":
