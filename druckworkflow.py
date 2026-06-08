@@ -216,6 +216,24 @@ def _pages_similar(pix_a, pix_b, threshold: float = 0.95) -> bool:
     return (matches / n) >= threshold
 
 
+def detect_leistungen_pages(doc, antrag_pages: int) -> int:
+    """Prueft ob die Leistungsbeschreibung 2 oder 3 Seiten hat.
+    Manchmal passt der Inhalt nicht auf 2 Seiten und eine 3. Seite
+    mit sehr wenig Text entsteht. Schwellwert: < 100 Woerter = Ueberlaufseite."""
+    overflow_idx = antrag_pages * 2 + 3  # Seite direkt nach den 2 Standard-Leistungsseiten
+    if overflow_idx >= doc.page_count:
+        return 2
+    text = doc[overflow_idx].get_text().strip()
+    word_count = len(text.split()) if text else 0
+    if 0 < word_count < 100:
+        log.info("Leistungs-Erkennung: 3 Seiten (Seite %s hat nur %s Woerter - Ueberlaufseite)",
+                 overflow_idx + 1, word_count)
+        return 3
+    log.info("Leistungs-Erkennung: 2 Seiten (Seite %s hat %s Woerter)",
+             overflow_idx + 1, word_count)
+    return 2
+
+
 def detect_antrag_pages(doc) -> int:
     """Prueft ob der Antrag 2 oder 3 Seiten hat.
     Seite 2 und Seite 4 werden bei 36 DPI verglichen.
@@ -258,7 +276,8 @@ def build_antrag(src_pdf: Path, out_pdf: Path, antrag_pages: int) -> None:
         out.close()
 
 
-def build_broschuere(src_pdf: Path, out_pdf: Path, antrag_pages: int) -> None:
+def build_broschuere(src_pdf: Path, out_pdf: Path, antrag_pages: int,
+                     leistungen_pages: int = 2) -> None:
     # Antrag-Seiten (Original) aus der Broschuere entfernen
     remove_idx = {p - 1 for p in range(2, 2 + antrag_pages)}
     with fitz.open(src_pdf) as doc:
@@ -273,8 +292,8 @@ def build_broschuere(src_pdf: Path, out_pdf: Path, antrag_pages: int) -> None:
         # Seitenreihenfolge: Anschreiben -> Leistungen -> Antrag-Kopie -> Rest
         # Nach dem Entfernen liegt die Antrag-Kopie auf Pos. 1..antrag_pages,
         # die 2 Leistungsseiten direkt dahinter. Leistungen werden vorgezogen.
-        leist_start = antrag_pages + 1   # erster Leistungs-Index (0-basiert)
-        leist_end   = antrag_pages + 3   # Index nach letzter Leistungsseite
+        leist_start = antrag_pages + 1                      # erster Leistungs-Index (0-basiert)
+        leist_end   = antrag_pages + 1 + leistungen_pages  # Index nach letzter Leistungsseite
         n = out.page_count
         if leist_end > n:
             raise ValueError(
@@ -290,7 +309,8 @@ def build_broschuere(src_pdf: Path, out_pdf: Path, antrag_pages: int) -> None:
         out.select(order)
 
         if CONVERT_BROSCHUERE_TO_GRAYSCALE:
-            gs_start_idx = GRAYSCALE_FROM_PAGE - 1
+            # Graustufen beginnen nach Anschreiben + Leistungsseiten
+            gs_start_idx = leistungen_pages + 1
             new = fitz.open()
             for i, page in enumerate(out):
                 if i >= gs_start_idx:
@@ -344,7 +364,8 @@ def process(pdf_path: Path) -> None:
     try:
         with fitz.open(work_pdf) as doc:
             n = doc.page_count
-            antrag_pages = detect_antrag_pages(doc)
+            antrag_pages    = detect_antrag_pages(doc)
+            leistungen_pages = detect_leistungen_pages(doc, antrag_pages)
         if n < 3:
             raise ValueError(f"PDF hat nur {n} Seite(n), mindestens 3 noetig.")
 
@@ -364,7 +385,7 @@ def process(pdf_path: Path) -> None:
         build_antrag(work_pdf, antrag_tmp, antrag_pages)
 
         log.info("Erzeuge Broschueren-PDF: %s", bro_name)
-        build_broschuere(work_pdf, bro_tmp, antrag_pages)
+        build_broschuere(work_pdf, bro_tmp, antrag_pages, leistungen_pages)
 
         log.info("Liefere Antrag -> %s", ANTRAG_DRUCKORDNER)
         deliver(antrag_tmp, ANTRAG_DRUCKORDNER)
