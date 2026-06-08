@@ -273,8 +273,8 @@ def build_broschuere(src_pdf: Path, out_pdf: Path, antrag_pages: int) -> None:
         # Seitenreihenfolge: Anschreiben -> Leistungen -> Antrag-Kopie -> Rest
         # Nach dem Entfernen liegt die Antrag-Kopie auf Pos. 1..antrag_pages,
         # die 2 Leistungsseiten direkt dahinter. Leistungen werden vorgezogen.
-        leist_start = antrag_pages       # erster Leistungs-Index (0-basiert)
-        leist_end   = antrag_pages + 2   # Index nach letzter Leistungsseite
+        leist_start = antrag_pages + 1   # erster Leistungs-Index (0-basiert)
+        leist_end   = antrag_pages + 3   # Index nach letzter Leistungsseite
         n = out.page_count
         if leist_end > n:
             raise ValueError(
