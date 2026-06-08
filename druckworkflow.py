@@ -504,6 +504,7 @@ def self_update() -> None:
         return
 
     target = Path(__file__).resolve()
+    log.info("Auto-Update: pruefe auf neue Version (GitHub) ...")
     try:
         req = urllib.request.Request(GITHUB_RAW_URL,
                                      headers={"Cache-Control": "no-cache"})
