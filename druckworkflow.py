@@ -548,6 +548,34 @@ def self_update() -> None:
         sys.exit(1)
 
 
+def _print_bereit() -> None:
+    """Gibt den Bereit-/Beenden-Hinweis aus. Wird nach jedem abgearbeiteten
+    Stapel erneut gezeigt, damit der Strg+C-Hinweis immer als Letztes steht
+    und nicht von neuen Druckmeldungen nach oben verdraengt wird."""
+    print()
+    print("=" * 60)
+    print("  BEREIT - Druckworkflow laeuft.")
+    print("  Neue Dateien werden automatisch verarbeitet.")
+    print("  Zum Beenden: Strg+C druecken.")
+    print("=" * 60)
+    print()
+
+
+def _warte_auf_taste(prompt: str) -> None:
+    """Wartet auf EINEN beliebigen Tastendruck - nicht nur auf Return."""
+    print(prompt, end="", flush=True)
+    try:
+        import msvcrt
+        msvcrt.getch()
+        print()
+    except Exception:
+        # Fallback ausserhalb von Windows: auf Enter warten.
+        try:
+            input()
+        except EOFError:
+            pass
+
+
 def main():
     self_update()
     log.info("=" * 60)
@@ -571,13 +599,7 @@ def main():
                 log.error("Unerwarteter Fehler: %s", e)
                 log.error(traceback.format_exc())
 
-        print()
-        print("=" * 60)
-        print("  BEREIT - Druckworkflow laeuft.")
-        print("  Neue Dateien werden automatisch verarbeitet.")
-        print("  Zum Beenden: Strg+C druecken.")
-        print("=" * 60)
-        print()
+        _print_bereit()
 
         while True:
             f = next_input_file()
@@ -587,6 +609,10 @@ def main():
                 except Exception as e:
                     log.error("Unerwarteter Fehler: %s", e)
                     log.error(traceback.format_exc())
+                # Wenn nichts mehr ansteht, den Hinweis erneut ausgeben, damit
+                # der Strg+C-Hinweis immer als letztes sichtbar bleibt.
+                if next_input_file() is None:
+                    _print_bereit()
             else:
                 time.sleep(2)
     except KeyboardInterrupt:
@@ -595,7 +621,7 @@ def main():
         print("  Druckworkflow beendet.")
         print("=" * 60)
         print()
-        input("  Druecken Sie eine beliebige Taste zum Schliessen ...")
+        _warte_auf_taste("  Druecken Sie eine beliebige Taste zum Schliessen ...")
 
 
 if __name__ == "__main__":
