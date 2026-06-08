@@ -12,6 +12,7 @@ import time
 import shutil
 import logging
 import traceback
+import urllib.request
 from pathlib import Path
 
 import io
@@ -29,13 +30,47 @@ DONE   = r"C:\Druckworkflow\04_Erledigt"
 ERROR  = r"C:\Druckworkflow\99_Fehler"
 LOGDIR = r"C:\Druckworkflow\logs"
 
-# Bestehende Hot-Folder des Fiery-Druckers
-# --- TEST-MODUS: zeigt auf lokale Testordner ---
-ANTRAG_DRUCKORDNER     = r"C:\Druckworkflow\TEST_Antrag"
-BROSCHUERE_DRUCKORDNER = r"C:\Druckworkflow\TEST_Broschuere"
-# --- ECHTE Pfade (spaeter aktivieren, obige zwei Zeilen dafuer auskommentieren) ---
-# ANTRAG_DRUCKORDNER     = r"\\SERVER\Druck\Antrag_A4_Duplex"
-# BROSCHUERE_DRUCKORDNER = r"\\SERVER\Druck\Broschuere_A3"
+# Bestehende Hot-Folder des Fiery-Druckers - PRO PC unterschiedlich.
+# Diese Pfade stehen NICHT hier im Code, sondern in config_lokal.py, weil sie
+# auf jedem Rechner anders sind (Test vs. echter Fiery). config_lokal.py ist
+# per .gitignore vom Auto-Update ausgenommen - so setzt ein Update die echten
+# Druckordner nie versehentlich auf TEST zurueck.
+# Fehlt die Datei, wird beim ersten Start eine Vorlage mit TEST-Pfaden angelegt.
+_CONFIG_LOKAL = Path(__file__).resolve().parent / "config_lokal.py"
+
+_CONFIG_TEMPLATE = '''# -*- coding: utf-8 -*-
+# Lokale Konfiguration DIESES PCs.
+# Wird NICHT zu GitHub gesynct und vom Auto-Update nicht angetastet.
+# Hier die Druckordner dieses Rechners eintragen.
+
+# TEST-Modus (Ausgabe in lokale Ordner, nichts geht an den Drucker):
+ANTRAG_DRUCKORDNER     = r"C:\\Druckworkflow\\TEST_Antrag"
+BROSCHUERE_DRUCKORDNER = r"C:\\Druckworkflow\\TEST_Broschuere"
+
+# ECHT-Betrieb: die beiden TEST-Zeilen oben auskommentieren (# davor), diese
+# beiden aktivieren (# entfernen) und an die echten Fiery-Hot-Folder anpassen:
+# ANTRAG_DRUCKORDNER     = r"\\\\SERVER\\Druck\\Antrag_A4_Duplex"
+# BROSCHUERE_DRUCKORDNER = r"\\\\SERVER\\Druck\\Broschuere_A3"
+'''
+
+if not _CONFIG_LOKAL.exists():
+    _CONFIG_LOKAL.write_text(_CONFIG_TEMPLATE, encoding="utf-8")
+
+try:
+    sys.path.insert(0, str(_CONFIG_LOKAL.parent))
+    from config_lokal import ANTRAG_DRUCKORDNER, BROSCHUERE_DRUCKORDNER
+except Exception:
+    # Fallback, falls config_lokal.py fehlt/fehlerhaft ist: sicherer TEST-Modus.
+    ANTRAG_DRUCKORDNER     = r"C:\Druckworkflow\TEST_Antrag"
+    BROSCHUERE_DRUCKORDNER = r"C:\Druckworkflow\TEST_Broschuere"
+
+# ── Auto-Update von GitHub ──────────────────────────────────────────────────
+# Beim Start die neueste druckworkflow.py von GitHub holen (Repo ist public,
+# daher kein Login noetig) und sich bei Aenderung mit der neuen Version neu
+# starten. config_lokal.py bleibt dabei unberuehrt. Bei fehlendem Internet
+# laeuft der Druckbetrieb mit der vorhandenen Version weiter.
+SELF_UPDATE    = True
+GITHUB_RAW_URL = "https://raw.githubusercontent.com/kounen80/drucker-workflow/main/druckworkflow.py"
 
 # Seitenbereich (menschliche Zaehlung: Seite 1 = erste Seite)
 # ANTRAG_END_PAGE wird dynamisch berechnet (2 oder 3 Antragsseiten moeglich).
@@ -456,7 +491,65 @@ def next_input_file():
     return pdfs[0]
 
 
+def self_update() -> None:
+    """Holt die neueste druckworkflow.py von GitHub und startet sich bei
+    Aenderung mit der neuen Version neu. Netzwerkfehler werden ignoriert -
+    der Druckbetrieb laeuft dann mit der vorhandenen Version weiter.
+    config_lokal.py wird nie angefasst (steht in einer eigenen Datei)."""
+    if not SELF_UPDATE:
+        return
+    # Endlosschleife verhindern: direkt nach einem Selbst-Update einmal aussetzen.
+    if os.environ.get("DRUCKWORKFLOW_UPDATED") == "1":
+        os.environ.pop("DRUCKWORKFLOW_UPDATED", None)
+        return
+
+    target = Path(__file__).resolve()
+    try:
+        req = urllib.request.Request(GITHUB_RAW_URL,
+                                     headers={"Cache-Control": "no-cache"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            remote = resp.read()
+    except Exception as e:
+        log.warning("Update-Pruefung uebersprungen (kein GitHub-Zugriff): %s", e)
+        return
+
+    def _norm(b: bytes) -> bytes:
+        # Zeilenenden vereinheitlichen, damit reine CRLF/LF-Unterschiede kein
+        # sinnloses Update ausloesen.
+        return b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+    try:
+        local = target.read_bytes()
+    except OSError as e:
+        log.warning("Eigene Datei nicht lesbar - Update uebersprungen: %s", e)
+        return
+
+    if _norm(remote) == _norm(local):
+        log.info("Auto-Update: bereits aktuell.")
+        return
+
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    backup = target.with_name(f"druckworkflow_backup_{ts}.py")
+    try:
+        shutil.copy2(target, backup)
+        target.write_bytes(remote)
+    except OSError as e:
+        log.error("Auto-Update fehlgeschlagen (Schreibfehler): %s", e)
+        return
+
+    log.info("Auto-Update: neue Version installiert (Backup: %s). Neustart ...",
+             backup.name)
+    os.environ["DRUCKWORKFLOW_UPDATED"] = "1"
+    try:
+        os.execv(sys.executable, [sys.executable, str(target)] + sys.argv[1:])
+    except OSError as e:
+        log.error("Neustart nach Update fehlgeschlagen: %s - bitte manuell neu "
+                  "starten.", e)
+        sys.exit(1)
+
+
 def main():
+    self_update()
     log.info("=" * 60)
     log.info("Druckworkflow gestartet. Eingang: %s", INPUT)
     log.info("Antrag-Hotfolder:     %s", ANTRAG_DRUCKORDNER)

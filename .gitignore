@@ -24,3 +24,9 @@ deliver/
 
 # Logs
 *.log
+
+# Lokale PC-Konfiguration (Druckordner pro Rechner) - darf nie gesynct werden
+config_lokal.py
+
+# Backups, die das Auto-Update anlegt
+druckworkflow_backup_*.py

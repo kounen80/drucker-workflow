@@ -188,6 +188,20 @@ NUMMERIERUNG
 
 Nach jeder Aenderung Skript neu starten.
 
+AUTO-UPDATE (von GitHub)
+  SELF_UPDATE    = True
+  GITHUB_RAW_URL = https://raw.githubusercontent.com/.../druckworkflow.py
+      -> Bei jedem Start holt sich das Skript die neueste
+         druckworkflow.py von GitHub und startet sich bei einer
+         Aenderung automatisch mit der neuen Version neu. Vorher
+         wird ein Backup (druckworkflow_backup_DATUM.py) angelegt.
+         Ohne Internet laeuft der Druckbetrieb mit der vorhandenen
+         Version weiter - es passiert nichts Schlimmes.
+         config_lokal.py (die Druckordner-Pfade) wird dabei NIE
+         angetastet. So genuegt EIN "git push", damit alle PCs
+         beim naechsten Start aktuell sind.
+         Zum Abschalten: SELF_UPDATE = False.
+
 
 ----------------------------------------------------------------
 SCHRITT 6: Fiery-Hot-Folder vorbereiten (WICHTIG!)
@@ -230,17 +244,24 @@ kleiner werden wuerde.
 SCHRITT 7: Echte Druckordner aktivieren
 ----------------------------------------------------------------
 
-Solange im Skript die TEST_*-Pfade stehen, geht nichts an den
+Die Druckordner-Pfade stehen NICHT mehr in druckworkflow.py, sondern
+in einer eigenen Datei pro PC:  C:\Druckworkflow\config_lokal.py
+Diese wird beim ersten Start automatisch mit TEST-Pfaden angelegt und
+NICHT von GitHub ueberschrieben (sie ist vom Auto-Update ausgenommen).
+So bleibt der ECHT-Betrieb dieses PCs erhalten, auch wenn eine neue
+druckworkflow.py gezogen wird.
+
+Solange in config_lokal.py die TEST_*-Pfade stehen, geht nichts an den
 Drucker. Sobald alles funktioniert:
 
-1. C:\Druckworkflow\druckworkflow.py in Editor oeffnen.
+1. C:\Druckworkflow\config_lokal.py in Editor oeffnen.
 
-2. Oben die Zeilen suchen:
+2. Inhalt:
 
-       # --- TEST-MODUS: zeigt auf lokale Testordner ---
+       # TEST-Modus:
        ANTRAG_DRUCKORDNER     = r"C:\Druckworkflow\TEST_Antrag"
        BROSCHUERE_DRUCKORDNER = r"C:\Druckworkflow\TEST_Broschuere"
-       # --- ECHTE Pfade ---
+       # ECHT-Betrieb:
        # ANTRAG_DRUCKORDNER     = r"\\SERVER\Druck\Antrag_A4_Duplex"
        # BROSCHUERE_DRUCKORDNER = r"\\SERVER\Druck\Broschuere_A3"
 

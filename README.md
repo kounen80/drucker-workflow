@@ -30,6 +30,12 @@ git commit -m "Kurze Beschreibung"
 git push
 ```
 
+## Auto-Update von GitHub
+
+Beim Start holt sich `druckworkflow.py` automatisch die neueste Version von GitHub (das Repo ist public, kein Login noetig) und startet sich bei einer Aenderung mit der neuen Version neu. Ein Backup wird vorher angelegt. Es genuegt also **ein `git push`** auf einem Rechner — alle anderen PCs sind beim naechsten Start aktuell. Ohne Internet laeuft der Druckbetrieb mit der vorhandenen Version weiter.
+
+Die PC-spezifischen Druckordner stehen in `config_lokal.py` (pro Rechner, nicht im Repo). Diese Datei wird vom Auto-Update **nie** ueberschrieben — der ECHT-Betrieb eines PCs bleibt also erhalten. Vorlage: `config_lokal.example.py`. Abschalten per `SELF_UPDATE = False` in `druckworkflow.py`.
+
 ## Was nicht im Repo liegt
 
 Per `.gitignore` ausgeschlossen: echte PDFs (`*.pdf`), Arbeitsordner (`01_Eingang`, `02_InArbeit`, `04_Erledigt`, `99_Fehler`), `logs/`, `counter.txt`. Werden beim ersten Start lokal angelegt.
