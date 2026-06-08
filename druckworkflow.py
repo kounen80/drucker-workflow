@@ -36,8 +36,10 @@ BROSCHUERE_DRUCKORDNER = r"C:\Druckworkflow\TEST_Broschuere"
 # BROSCHUERE_DRUCKORDNER = r"\\SERVER\Druck\Broschuere_A3"
 
 # Seitenbereich (menschliche Zaehlung: Seite 1 = erste Seite)
+# ANTRAG_END_PAGE wird dynamisch berechnet (2 oder 3 Antragsseiten moeglich).
 ANTRAG_START_PAGE = 2
-ANTRAG_END_PAGE   = 3
+# Fallback-Antragslaenge falls die Auto-Erkennung nicht greift:
+ANTRAG_PAGES_FALLBACK = 2
 
 # Antrag als 300-dpi-JPEG neu einbetten.
 # Loest Transparenz-/Formularfeld-Probleme beim Fiery-RIP - alles wird flach
@@ -49,15 +51,8 @@ RASTERIZE_ANTRAG = True
 ANTRAG_DPI       = 300
 ANTRAG_JPG_QUALITY = 92
 
-# Welche Seiten aus der Broschuere entfernt werden
-BROSCHUERE_REMOVE_PAGES = [2, 3]
-
-# Seitenvertausch in der Broschuere NACH dem Entfernen der REMOVE_PAGES.
-# Liste von Tupeln ((Bereich_A_Start, Bereich_A_Ende), (Bereich_B_Start, Bereich_B_Ende)).
-# Menschliche Seitenzaehlung. Bereiche muessen gleich gross sein.
-# Leere Liste = keine Vertauschung.
-# Beispiel: tausche Seiten 2-3 mit 4-5  ->  [((2, 3), (4, 5))]
-BROSCHUERE_SWAP_RANGES = [((2, 3), (4, 5))]
+# BROSCHUERE_REMOVE_PAGES und die Seitenreihenfolge werden dynamisch aus der
+# erkannten Antragslaenge abgeleitet. Keine statische Konfiguration noetig.
 
 # Graustufen-Option fuer die Broschuere
 # True = ab GRAYSCALE_FROM_PAGE werden alle Seiten in Graustufen umgewandelt.
@@ -77,7 +72,8 @@ MOVE_TO_PRINTFOLDER = False
 # Erscheint NUR in der Broschuere (der Antrag enthaelt Seite 1 ohnehin nicht).
 # Wird NACH der Graustufen-Konvertierung eingefuegt - bleibt also farbig.
 ADD_LOGO_TO_PAGE1 = True
-LOGO_SOURCE_PAGE  = 6                          # Seite, von der das Logo geholt wird
+# LOGO_SOURCE_PAGE wird dynamisch berechnet: antrag_pages * 2 + 2
+# (2-seitiger Antrag -> Seite 6, 3-seitiger Antrag -> Seite 8)
 LOGO_SOURCE_RECT  = (390, 60, 540, 110)        # Quellbereich in PDF-Punkten (x0,y0,x1,y1)
 LOGO_TARGET_RECT  = (390, 270, 560, 320)       # Zielbereich auf Seite 1
 LOGO_DPI          = 300
@@ -207,12 +203,44 @@ def deliver(src: Path, target_folder: str) -> Path:
 
 
 # ============================================================
+# Antragslängen-Erkennung
+# ============================================================
+
+def _pages_similar(pix_a, pix_b, threshold: float = 0.95) -> bool:
+    if (pix_a.width, pix_a.height) != (pix_b.width, pix_b.height):
+        return False
+    n = len(pix_a.samples)
+    if n == 0:
+        return False
+    matches = sum(1 for a, b in zip(pix_a.samples, pix_b.samples) if abs(a - b) < 15)
+    return (matches / n) >= threshold
+
+
+def detect_antrag_pages(doc) -> int:
+    """Prueft ob der Antrag 2 oder 3 Seiten hat.
+    Seite 2 und Seite 4 werden bei 36 DPI verglichen.
+    Sind sie identisch, beginnt die Antrag-Kopie auf Seite 4 (2-seitiger Antrag).
+    Sonst ist der Antrag 3 Seiten lang."""
+    if doc.page_count < 5:
+        log.info("Antrag-Erkennung: PDF hat weniger als 5 Seiten -> Fallback %s Seiten",
+                 ANTRAG_PAGES_FALLBACK)
+        return ANTRAG_PAGES_FALLBACK
+    pix2 = doc[1].get_pixmap(dpi=36, colorspace=fitz.csGRAY)
+    pix4 = doc[3].get_pixmap(dpi=36, colorspace=fitz.csGRAY)
+    if _pages_similar(pix2, pix4):
+        log.info("Antrag-Erkennung: 2 Seiten (Seite 4 entspricht Seite 2)")
+        return 2
+    log.info("Antrag-Erkennung: 3 Seiten (Seite 4 unterscheidet sich von Seite 2)")
+    return 3
+
+
+# ============================================================
 # PDF-Verarbeitung
 # ============================================================
 
-def build_antrag(src_pdf: Path, out_pdf: Path) -> None:
+def build_antrag(src_pdf: Path, out_pdf: Path, antrag_pages: int) -> None:
     start_idx = ANTRAG_START_PAGE - 1
-    end_idx   = ANTRAG_END_PAGE - 1
+    end_idx   = ANTRAG_START_PAGE + antrag_pages - 2  # dynamisch aus erkannter Laenge
     with fitz.open(src_pdf) as doc:
         out = fitz.open()
         if RASTERIZE_ANTRAG:
@@ -230,8 +258,9 @@ def build_antrag(src_pdf: Path, out_pdf: Path) -> None:
         out.close()
 
 
-def build_broschuere(src_pdf: Path, out_pdf: Path) -> None:
-    remove_idx = {p - 1 for p in BROSCHUERE_REMOVE_PAGES}
+def build_broschuere(src_pdf: Path, out_pdf: Path, antrag_pages: int) -> None:
+    # Antrag-Seiten (Original) aus der Broschuere entfernen
+    remove_idx = {p - 1 for p in range(2, 2 + antrag_pages)}
     with fitz.open(src_pdf) as doc:
         keep = [i for i in range(doc.page_count) if i not in remove_idx]
         if not keep:
@@ -241,26 +270,24 @@ def build_broschuere(src_pdf: Path, out_pdf: Path) -> None:
         for i in keep:
             out.insert_pdf(doc, from_page=i, to_page=i)
 
-        # Seitenvertausch innerhalb der Broschuere
-        if BROSCHUERE_SWAP_RANGES:
-            n = out.page_count
-            order = list(range(n))
-            for (a1, a2), (b1, b2) in BROSCHUERE_SWAP_RANGES:
-                a_idx = list(range(a1 - 1, a2))
-                b_idx = list(range(b1 - 1, b2))
-                if len(a_idx) != len(b_idx):
-                    raise ValueError(
-                        f"Swap-Bereiche {a1}-{a2} und {b1}-{b2} "
-                        f"muessen gleich gross sein."
-                    )
-                if max(a_idx + b_idx) >= n:
-                    raise ValueError(
-                        f"Swap-Bereich verweist auf Seite > {n} "
-                        f"(Broschuere hat nur {n} Seiten)."
-                    )
-                for ai, bi in zip(a_idx, b_idx):
-                    order[ai], order[bi] = order[bi], order[ai]
-            out.select(order)
+        # Seitenreihenfolge: Anschreiben -> Leistungen -> Antrag-Kopie -> Rest
+        # Nach dem Entfernen liegt die Antrag-Kopie auf Pos. 1..antrag_pages,
+        # die 2 Leistungsseiten direkt dahinter. Leistungen werden vorgezogen.
+        leist_start = antrag_pages       # erster Leistungs-Index (0-basiert)
+        leist_end   = antrag_pages + 2   # Index nach letzter Leistungsseite
+        n = out.page_count
+        if leist_end > n:
+            raise ValueError(
+                f"Broschuere hat nach dem Entfernen nur {n} Seiten, "
+                f"aber fuer die Reihenfolge werden mindestens {leist_end + 1} erwartet."
+            )
+        order = (
+            [0]
+            + list(range(leist_start, leist_end))
+            + list(range(1, leist_start))
+            + list(range(leist_end, n))
+        )
+        out.select(order)
 
         if CONVERT_BROSCHUERE_TO_GRAYSCALE:
             gs_start_idx = GRAYSCALE_FROM_PAGE - 1
@@ -280,17 +307,19 @@ def build_broschuere(src_pdf: Path, out_pdf: Path) -> None:
 
         # Logo von Quellseite holen und auf Seite 1 platzieren.
         # Bewusst NACH dem Graustufen-Schritt - so bleibt das Logo farbig.
+        # Quellseite = erste Leistungsseite im Original: antrag_pages * 2 + 2
         if ADD_LOGO_TO_PAGE1:
-            if LOGO_SOURCE_PAGE > doc.page_count:
+            logo_source_page = antrag_pages * 2 + 2
+            if logo_source_page > doc.page_count:
                 log.warning(
                     "Logo-Quellseite %s existiert nicht (PDF hat %s Seiten) - "
                     "Logo wird uebersprungen.",
-                    LOGO_SOURCE_PAGE, doc.page_count,
+                    logo_source_page, doc.page_count,
                 )
             elif out.page_count < 1:
                 log.warning("Broschuere hat keine Seite 1 - Logo wird uebersprungen.")
             else:
-                src_page = doc[LOGO_SOURCE_PAGE - 1]
+                src_page = doc[logo_source_page - 1]
                 src_rect = fitz.Rect(*LOGO_SOURCE_RECT)
                 pix = src_page.get_pixmap(clip=src_rect, dpi=LOGO_DPI)
                 target_rect = fitz.Rect(*LOGO_TARGET_RECT)
@@ -315,6 +344,7 @@ def process(pdf_path: Path) -> None:
     try:
         with fitz.open(work_pdf) as doc:
             n = doc.page_count
+            antrag_pages = detect_antrag_pages(doc)
         if n < 3:
             raise ValueError(f"PDF hat nur {n} Seite(n), mindestens 3 noetig.")
 
@@ -331,10 +361,10 @@ def process(pdf_path: Path) -> None:
         bro_tmp    = Path(WORK) / bro_name
 
         log.info("Erzeuge Antrag-PDF: %s", antrag_name)
-        build_antrag(work_pdf, antrag_tmp)
+        build_antrag(work_pdf, antrag_tmp, antrag_pages)
 
         log.info("Erzeuge Broschueren-PDF: %s", bro_name)
-        build_broschuere(work_pdf, bro_tmp)
+        build_broschuere(work_pdf, bro_tmp, antrag_pages)
 
         log.info("Liefere Antrag -> %s", ANTRAG_DRUCKORDNER)
         deliver(antrag_tmp, ANTRAG_DRUCKORDNER)
