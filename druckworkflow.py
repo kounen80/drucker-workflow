@@ -62,6 +62,13 @@ GRAYSCALE_FROM_PAGE = 4
 GRAYSCALE_DPI = 180
 GRAYSCALE_JPG_QUALITY = 82
 
+# Farb-Seiten (Anschreiben + Leistungen) ebenfalls als JPEG einbetten.
+# Verhindert dass der Fiery-RIP ICC-Farbprofile der Vektor-Seiten interpretiert
+# und Farben (z.B. Gruen auf den Leistungsseiten) blass druckt.
+RASTERIZE_COLOR_PAGES = True
+COLOR_DPI = 250
+COLOR_JPG_QUALITY = 92
+
 # Stabilitaetspruefung
 STABILITY_CHECKS    = 3
 STABILITY_INTERVAL  = 1.0
@@ -296,15 +303,21 @@ def build_broschuere(src_pdf: Path, out_pdf: Path, antrag_pages: int) -> None:
         order = [0] + leist_indices + list(range(1, antrag_pages + 1)) + rest
         out.select(order)
 
-        if CONVERT_BROSCHUERE_TO_GRAYSCALE:
+        if CONVERT_BROSCHUERE_TO_GRAYSCALE or RASTERIZE_COLOR_PAGES:
             # Graustufen beginnen nach Anschreiben + Leistungsseiten
             gs_start_idx = leistungen_pages + 1
             new = fitz.open()
             for i, page in enumerate(out):
-                if i >= gs_start_idx:
+                if i >= gs_start_idx and CONVERT_BROSCHUERE_TO_GRAYSCALE:
                     pix = page.get_pixmap(dpi=GRAYSCALE_DPI,
                                           colorspace=fitz.csGRAY)
                     jpg_bytes = pix.tobytes("jpg", jpg_quality=GRAYSCALE_JPG_QUALITY)
+                    rect = page.rect
+                    np_page = new.new_page(width=rect.width, height=rect.height)
+                    np_page.insert_image(rect, stream=jpg_bytes)
+                elif i < gs_start_idx and RASTERIZE_COLOR_PAGES:
+                    pix = page.get_pixmap(dpi=COLOR_DPI)
+                    jpg_bytes = pix.tobytes("jpg", jpg_quality=COLOR_JPG_QUALITY)
                     rect = page.rect
                     np_page = new.new_page(width=rect.width, height=rect.height)
                     np_page.insert_image(rect, stream=jpg_bytes)
