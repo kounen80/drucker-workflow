@@ -19,7 +19,7 @@ from pathlib import Path
 
 import io
 import fitz  # PyMuPDF
-from PIL import Image
+from PIL import Image, ImageChops
 
 # ============================================================
 # KONFIGURATION - hier alles anpassen
@@ -101,12 +101,17 @@ GRAYSCALE_FROM_PAGE = 4
 GRAYSCALE_DPI = 180
 GRAYSCALE_JPG_QUALITY = 82
 
-# Farb-Seiten (Anschreiben + Leistungen) als CMYK-JPEG einbetten (via Pillow).
-# Pillow konvertiert RGB->CMYK korrekt (PyMuPDF csCMYK invertiert die Werte).
-# CMYK-Ausgabe: der Fiery muss nicht konvertieren -> kraeftiges Gruen bleibt erhalten.
+# Farb-Seiten (Anschreiben + Leistungen) als CMYK-JPEG einbetten.
+# WICHTIG - Schwarz muss in den K-Kanal (Schwarz-Toner), nicht aus 300% C+M+Y:
+# Pillows Standard-convert('CMYK') laesst K=0, baut Schwarz also aus Cyan+Magenta+
+# Gelb. Auf dem Fiery druckt schwarzer Text dann matschig/graeulich (CMY-Schwarz +
+# JPEG-Chroma verwaschen die Kanten). Daher konvertieren wir mit voller GCR:
+# der gemeinsame Grauanteil wandert in den K-Kanal -> Text wird knackig schwarz,
+# kraeftige Farben (z.B. Gruen) bleiben unveraendert. 4:4:4 (subsampling=0) haelt
+# zusaetzlich die Farb-/Textkanten scharf.
 RASTERIZE_COLOR_PAGES = True
-COLOR_DPI = 250
-COLOR_JPG_QUALITY = 92
+COLOR_DPI = 300            # wie der Antrag - 250 war zu grob fuer Kleintext
+COLOR_JPG_QUALITY = 95
 
 # Stabilitaetspruefung
 STABILITY_CHECKS    = 3
@@ -357,8 +362,22 @@ def build_broschuere(src_pdf: Path, out_pdf: Path, antrag_pages: int) -> None:
                 elif i < gs_start_idx and RASTERIZE_COLOR_PAGES:
                     pix = page.get_pixmap(dpi=COLOR_DPI)
                     img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                    # RGB -> CMYK mit voller GCR: gemeinsamer Grauanteil in K legen,
+                    # damit Schwarz/Text mit Schwarz-Toner druckt (nicht aus 300%
+                    # C+M+Y, was matschig/graeulich wird). Saturierte Farben bleiben
+                    # unveraendert (z.B. reines Gruen: K=0).
+                    r, g, b = img.split()
+                    c = ImageChops.invert(r)
+                    m = ImageChops.invert(g)
+                    y = ImageChops.invert(b)
+                    k = ImageChops.darker(ImageChops.darker(c, m), y)
+                    c = ImageChops.subtract(c, k)
+                    m = ImageChops.subtract(m, k)
+                    y = ImageChops.subtract(y, k)
+                    cmyk = Image.merge("CMYK", (c, m, y, k))
                     buf = io.BytesIO()
-                    img.convert("CMYK").save(buf, format="JPEG", quality=COLOR_JPG_QUALITY)
+                    cmyk.save(buf, format="JPEG", quality=COLOR_JPG_QUALITY,
+                              subsampling=0)
                     jpg_bytes = buf.getvalue()
                     rect = page.rect
                     np_page = new.new_page(width=rect.width, height=rect.height)
