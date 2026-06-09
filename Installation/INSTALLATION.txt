@@ -68,14 +68,14 @@ SCHRITT 3: Benoetigte Python-Pakete installieren
        C:\Druckworkflow\Installation\install_pakete.bat
 
    Es oeffnet sich ein schwarzes Fenster und installiert
-   PyMuPDF und Pillow. Wenn am Ende
+   PyMuPDF. Wenn am Ende
        "Pakete erfolgreich installiert"
    steht, ist alles gut.
 
 2. Falls der Doppelklick nicht funktioniert: PowerShell oeffnen
    und manuell ausfuehren:
        py -m pip install --upgrade pip
-       py -m pip install pymupdf pillow
+       py -m pip install pymupdf
 
 
 ----------------------------------------------------------------
@@ -153,13 +153,12 @@ BROSCHUERE (A3 Booklet, ab S.4 Graustufen)
          ab. Hier ist keine statische Konfiguration mehr noetig
          (frueher: BROSCHUERE_REMOVE_PAGES / BROSCHUERE_SWAP_RANGES).
 
-  RASTERIZE_COLOR_PAGES = True
-  COLOR_DPI             = 250
-  COLOR_JPG_QUALITY     = 92
-      -> Die Farbseiten (Anschreiben + Leistungen) werden als
-         CMYK-JPEG eingebettet (via Pillow). So muss der Fiery
-         nicht selbst konvertieren - kraeftige Farben bleiben
-         erhalten.
+      -> Die Farbseiten (Anschreiben + Leistungen) werden NICHT
+         gerastert, sondern als Original-Vektor uebernommen -
+         knackiges Schwarz und kraeftige Farben direkt aus dem
+         Quell-PDF. (Eine fruehere CMYK-Rasterung dieser Seiten
+         fuehrte zu matschigem, graeulichem Text und wurde wieder
+         entfernt.)
 
   CONVERT_BROSCHUERE_TO_GRAYSCALE = True
   GRAYSCALE_FROM_PAGE       = 4

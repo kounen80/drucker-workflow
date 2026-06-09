@@ -33,17 +33,6 @@ if errorlevel 1 (
 )
 
 echo.
-echo Installiere Pillow ...
-py -m pip install pillow
-
-if errorlevel 1 (
-    echo.
-    echo FEHLER bei der Paket-Installation.
-    pause
-    exit /b 1
-)
-
-echo.
 echo ================================================================
 echo   Pakete erfolgreich installiert.
 echo ================================================================
