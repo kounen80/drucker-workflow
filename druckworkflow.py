@@ -17,7 +17,9 @@ import subprocess
 import urllib.request
 from pathlib import Path
 
+import io
 import fitz  # PyMuPDF
+from PIL import Image, ImageChops
 
 # ============================================================
 # KONFIGURATION - hier alles anpassen
@@ -99,11 +101,21 @@ GRAYSCALE_FROM_PAGE = 4
 GRAYSCALE_DPI = 180
 GRAYSCALE_JPG_QUALITY = 82
 
-# Farb-Seiten (Anschreiben + Leistungen) werden NICHT gerastert, sondern als
-# Original-Vektor uebernommen -> knackiges Schwarz und kraeftige Farben direkt aus
-# dem Quell-PDF. (Eine fruehere CMYK-Rasterung dieser Seiten fuehrte zu matschigem,
-# graeulichem Text und wurde wieder entfernt.) Nur die Seiten ab Seite 4 werden zu
-# Graustufen gerastert (siehe oben), und der Antrag separat als JPEG.
+# Farb-Seiten (Anschreiben + Leistungen) als CMYK-JPEG einbetten.
+# WICHTIG - Schwarz muss in den K-Kanal (Schwarz-Toner), nicht aus 300% C+M+Y:
+# Pillows Standard-convert('CMYK') laesst K=0, baut Schwarz also aus Cyan+Magenta+
+# Gelb. Auf dem Fiery druckt schwarzer Text dann matschig/graeulich (CMY-Schwarz +
+# JPEG-Chroma verwaschen die Kanten). Daher konvertieren wir mit GCR (Staerke per
+# COLOR_GCR_STRENGTH einstellbar): der gemeinsame Grauanteil wandert anteilig in den
+# K-Kanal -> Text wird knackig schwarz, kraeftige Farben (z.B. Gruen) bleiben weitgehend
+# unveraendert. 4:4:4 (subsampling=0) haelt zusaetzlich die Farb-/Textkanten scharf.
+RASTERIZE_COLOR_PAGES = True
+COLOR_DPI = 300            # wie der Antrag - 250 war zu grob fuer Kleintext
+COLOR_JPG_QUALITY = 95
+# GCR-Staerke fuer Farbseiten: 0.0 = kein GCR (reines CMY-Schwarz),
+# 1.0 = voller GCR (reines K-Schwarz). 0.8 ist ein guter Kompromiss:
+# Schwarz/Text druckt scharf ueber K-Kanal, Farben behalten Saettigung/Dichte.
+COLOR_GCR_STRENGTH = 0.80
 
 # Stabilitaetspruefung
 STABILITY_CHECKS    = 3
@@ -339,20 +351,47 @@ def build_broschuere(src_pdf: Path, out_pdf: Path, antrag_pages: int) -> None:
         order = [0] + leist_indices + list(range(1, antrag_pages + 1)) + rest
         out.select(order)
 
-        if CONVERT_BROSCHUERE_TO_GRAYSCALE:
+        if CONVERT_BROSCHUERE_TO_GRAYSCALE or RASTERIZE_COLOR_PAGES:
             # Graustufen beginnen nach Anschreiben + Leistungsseiten
             gs_start_idx = leistungen_pages + 1
             new = fitz.open()
             for i, page in enumerate(out):
-                if i >= gs_start_idx:
+                if i >= gs_start_idx and CONVERT_BROSCHUERE_TO_GRAYSCALE:
                     pix = page.get_pixmap(dpi=GRAYSCALE_DPI,
                                           colorspace=fitz.csGRAY)
                     jpg_bytes = pix.tobytes("jpg", jpg_quality=GRAYSCALE_JPG_QUALITY)
                     rect = page.rect
                     np_page = new.new_page(width=rect.width, height=rect.height)
                     np_page.insert_image(rect, stream=jpg_bytes)
+                elif i < gs_start_idx and RASTERIZE_COLOR_PAGES:
+                    pix = page.get_pixmap(dpi=COLOR_DPI)
+                    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                    # RGB -> CMYK: gemeinsamen Grauanteil (anteilig per
+                    # COLOR_GCR_STRENGTH) in den K-Kanal legen, damit Schwarz/Text mit
+                    # Schwarz-Toner druckt (nicht aus 300% C+M+Y, was matschig/graeulich
+                    # wird). Saturierte Farben bleiben weitgehend unveraendert.
+                    r, g, b = img.split()
+                    c = ImageChops.invert(r)
+                    m = ImageChops.invert(g)
+                    y = ImageChops.invert(b)
+                    # GCR mit COLOR_GCR_STRENGTH: nur ein Teil des Grauanteils in K
+                    # verschieben. Volle GCR (1.0) liess Drucke blass wirken, weil der
+                    # Fiery fuer CMY-gemischte Tiefen kalibriert ist; 0.8 haelt genug
+                    # CMY-Anteil fuer Koerper/Saettigung, K macht Text/Schwarz scharf.
+                    k_full = ImageChops.darker(ImageChops.darker(c, m), y)
+                    k = k_full.point(lambda v: int(v * COLOR_GCR_STRENGTH))
+                    c = ImageChops.subtract(c, k)
+                    m = ImageChops.subtract(m, k)
+                    y = ImageChops.subtract(y, k)
+                    cmyk = Image.merge("CMYK", (c, m, y, k))
+                    buf = io.BytesIO()
+                    cmyk.save(buf, format="JPEG", quality=COLOR_JPG_QUALITY,
+                              subsampling=0)
+                    jpg_bytes = buf.getvalue()
+                    rect = page.rect
+                    np_page = new.new_page(width=rect.width, height=rect.height)
+                    np_page.insert_image(rect, stream=jpg_bytes)
                 else:
-                    # Farbseiten (Anschreiben + Leistungen) als Original-Vektor
                     new.insert_pdf(out, from_page=i, to_page=i)
             out.close()
             out = new
