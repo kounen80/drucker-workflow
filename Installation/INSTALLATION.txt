@@ -153,12 +153,15 @@ BROSCHUERE (A3 Booklet, ab S.4 Graustufen)
          ab. Hier ist keine statische Konfiguration mehr noetig
          (frueher: BROSCHUERE_REMOVE_PAGES / BROSCHUERE_SWAP_RANGES).
 
-      -> Die Farbseiten (Anschreiben + Leistungen) werden NICHT
-         gerastert, sondern als Original-Vektor uebernommen -
-         knackiges Schwarz und kraeftige Farben direkt aus dem
-         Quell-PDF. (Eine fruehere CMYK-Rasterung dieser Seiten
-         fuehrte zu matschigem, graeulichem Text und wurde wieder
-         entfernt.)
+      -> Die Farbseiten (Anschreiben + Leistungen) werden als
+         300-dpi-CMYK-JPEG gerastert (Fiery-Anforderung, sonst
+         Mehrfachdruck/Transparenzprobleme). Die Farbtrennung
+         laeuft ueber ein echtes ICC-Profil (CoatedFOGRA39 =
+         ISO Coated v2), damit die Originalfarben erhalten
+         bleiben; schwarzer/grauer Text wird dabei rein ueber
+         den K-Kanal (Schwarz-Toner) aufgebaut und druckt
+         knackig scharf. Details: COLOR_ICC und
+         CMYK_PROFILE_KANDIDATEN im Skript.
 
   CONVERT_BROSCHUERE_TO_GRAYSCALE = True
   GRAYSCALE_FROM_PAGE       = 4
@@ -384,6 +387,24 @@ Loesung: LOGO_SOURCE_PAGE pruefen - muss auf eine Seite zeigen,
          Skript das Logo und schreibt eine Warnung ins Log.
          LOGO_TARGET_RECT  = (x_links, y_oben, x_rechts, y_unten)
          in PDF-Punkten. 1 mm = ca. 2.83 Punkte.
+
+Problem: Farben der Broschuere wirken blaeulich/flau - Tuerkis/
+         Gruen (Logo, "Haben Sie Fragen?"-Box) kippt Richtung
+         Blau, im Original ist es gruenlich.
+Loesung: Das Skript trennt die Farbseiten ueber ein ICC-Profil
+         (Standard: CoatedFOGRA39.icc = ISO Coated v2, so
+         interpretiert der Fiery DeviceCMYK-Daten). Steht im Log
+         die Warnung "Kein CMYK-Profil gefunden", fehlt das
+         Profil auf diesem PC und es greift die alte, ungenauere
+         GCR-Naeherung (= Blaustich). Abhilfe: Von einem PC mit
+         Adobe-Software die Datei
+             C:\Windows\System32\spool\drivers\color\CoatedFOGRA39.icc
+         holen und auf diesem PC ablegen als:
+             C:\Druckworkflow\fiery_cmyk.icc
+         Noch genauer wird es mit dem echten Profil des Fiery:
+         in der Command WorkStation unter Geraetecenter ->
+         Ressourcen -> Profile das CMYK-Quellprofil exportieren
+         und als C:\Druckworkflow\fiery_cmyk.icc ablegen.
 
 Problem: Broschuere ist sehr gross (15-25 MB).
 Loesung: Normal bei rasterten PDFs. Original-Vektor war klein,

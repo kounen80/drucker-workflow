@@ -19,7 +19,7 @@ from pathlib import Path
 
 import io
 import fitz  # PyMuPDF
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageCms
 
 # ============================================================
 # KONFIGURATION - hier alles anpassen
@@ -105,16 +105,38 @@ GRAYSCALE_JPG_QUALITY = 82
 # WICHTIG - Schwarz muss in den K-Kanal (Schwarz-Toner), nicht aus 300% C+M+Y:
 # Pillows Standard-convert('CMYK') laesst K=0, baut Schwarz also aus Cyan+Magenta+
 # Gelb. Auf dem Fiery druckt schwarzer Text dann matschig/graeulich (CMY-Schwarz +
-# JPEG-Chroma verwaschen die Kanten). Daher konvertieren wir mit GCR (Staerke per
-# COLOR_GCR_STRENGTH einstellbar): der gemeinsame Grauanteil wandert anteilig in den
-# K-Kanal -> Text wird knackig schwarz, kraeftige Farben (z.B. Gruen) bleiben weitgehend
-# unveraendert. 4:4:4 (subsampling=0) haelt zusaetzlich die Farb-/Textkanten scharf.
+# JPEG-Chroma verwaschen die Kanten). 4:4:4 (subsampling=0) haelt zusaetzlich
+# die Farb-/Textkanten scharf.
 RASTERIZE_COLOR_PAGES = True
 COLOR_DPI = 300            # wie der Antrag - 250 war zu grob fuer Kleintext
 COLOR_JPG_QUALITY = 95
-# GCR-Staerke fuer Farbseiten: 0.0 = kein GCR (reines CMY-Schwarz),
-# 1.0 = voller GCR (reines K-Schwarz). 0.8 ist ein guter Kompromiss:
-# Schwarz/Text druckt scharf ueber K-Kanal, Farben behalten Saettigung/Dichte.
+
+# RGB -> CMYK laeuft ueber echtes Farbmanagement (LittleCMS + ICC-Profil)
+# statt der frueheren Kanal-Invertierung mit GCR. Die Invertierung war nicht
+# farbmetrisch: gesaettigte Tuerkis-/Gruentoene kippten Richtung Blau und
+# wirkten flau (sichtbar z.B. auf Seite 1 oben im Logo und der Fragen-Box).
+# Mit ICC-Profil (Standard: CoatedFOGRA39 = ISO Coated v2 - das erwartet der
+# Fiery bei DeviceCMYK-Daten) bleiben die Originalfarben erhalten.
+# Schwarzer/grauer Text wandert weiterhin rein in den K-Kanal (Neutral-Maske
+# in rgb_zu_cmyk) - die Fiery-Anforderung "kein CMY-Schwarz" bleibt erfuellt.
+# Die Ausgabe bleibt JPEG/DCTDecode (Fiery-Anforderung, s. INSTALLATION.txt).
+# Fehlen alle Profile, faellt das Skript auf die alte GCR-Methode zurueck
+# und schreibt eine Warnung ins Log.
+COLOR_ICC = True
+# Kandidaten in dieser Reihenfolge; das erste vorhandene Profil gewinnt.
+# Eigenes Profil vom Fiery exportiert? Einfach als fiery_cmyk.icc nach
+# C:\Druckworkflow legen, dann hat es Vorrang.
+CMYK_PROFILE_KANDIDATEN = [
+    BASE + r"\fiery_cmyk.icc",
+    r"C:\Windows\System32\spool\drivers\color\CoatedFOGRA39.icc",
+    r"C:\Windows\System32\spool\drivers\color\USWebCoatedSWOP.icc",
+    r"C:\Windows\System32\spool\drivers\color\RSWOP.icm",
+]
+# Pixel gelten als neutral (Text/Grautoene -> reiner K-Kanal), wenn der
+# groesste Abstand zwischen R, G und B hoechstens so viele Stufen betraegt.
+NEUTRAL_TOLERANZ = 6
+# GCR-Staerke der Fallback-Methode (nur aktiv, wenn kein ICC-Profil da ist):
+# 0.0 = kein GCR (reines CMY-Schwarz), 1.0 = voller GCR (reines K-Schwarz).
 COLOR_GCR_STRENGTH = 0.80
 
 # Stabilitaetspruefung
@@ -291,6 +313,111 @@ def detect_antrag_pages(doc) -> int:
 
 
 # ============================================================
+# Farbmanagement (RGB -> CMYK fuer die Farbseiten)
+# ============================================================
+
+_CMYK_TRANSFORM = None        # einmal gebaut, dann wiederverwendet
+_CMYK_TRANSFORM_FEHLT = False # Warnung nur einmal loggen
+
+
+def _baue_cmyk_transform():
+    """Sucht das erste vorhandene CMYK-Profil und baut daraus die
+    sRGB->CMYK-Transformation (relativ farbmetrisch + Schwarzpunkt-
+    kompensation). Gibt None zurueck, wenn kein Profil nutzbar ist."""
+    global _CMYK_TRANSFORM, _CMYK_TRANSFORM_FEHLT
+    if _CMYK_TRANSFORM is not None or _CMYK_TRANSFORM_FEHLT:
+        return _CMYK_TRANSFORM
+    try:
+        intent = ImageCms.Intent.RELATIVE_COLORIMETRIC
+        flags  = ImageCms.Flags.BLACKPOINTCOMPENSATION
+    except AttributeError:  # aeltere Pillow-Versionen
+        intent = ImageCms.INTENT_RELATIVE_COLORIMETRIC
+        flags  = ImageCms.FLAGS["BLACKPOINTCOMPENSATION"]
+    for pfad in CMYK_PROFILE_KANDIDATEN:
+        if not Path(pfad).exists():
+            continue
+        try:
+            _CMYK_TRANSFORM = ImageCms.buildTransform(
+                ImageCms.createProfile("sRGB"), pfad, "RGB", "CMYK",
+                renderingIntent=intent, flags=flags)
+            log.info("Farbmanagement: nutze CMYK-Profil %s", Path(pfad).name)
+            return _CMYK_TRANSFORM
+        except Exception as e:
+            log.warning("CMYK-Profil %s nicht nutzbar: %s", pfad, e)
+    _CMYK_TRANSFORM_FEHLT = True
+    log.warning(
+        "Kein CMYK-Profil gefunden - Farbseiten nutzen die alte GCR-"
+        "Naeherung (Tuerkis/Gruen kann blaeulich kippen). Abhilfe: "
+        "CoatedFOGRA39.icc als %s ablegen.", CMYK_PROFILE_KANDIDATEN[0])
+    return None
+
+
+def _rgb_zu_cmyk_gcr(img: Image.Image) -> Image.Image:
+    """Alte Naeherung ohne ICC-Profil (Fallback): Kanal-Invertierung, dann
+    den gemeinsamen Grauanteil anteilig (COLOR_GCR_STRENGTH) in den K-Kanal
+    verschieben, damit Schwarz/Text ueber Schwarz-Toner druckt."""
+    r, g, b = img.split()
+    c = ImageChops.invert(r)
+    m = ImageChops.invert(g)
+    y = ImageChops.invert(b)
+    k_full = ImageChops.darker(ImageChops.darker(c, m), y)
+    k = k_full.point(lambda v: int(v * COLOR_GCR_STRENGTH))
+    c = ImageChops.subtract(c, k)
+    m = ImageChops.subtract(m, k)
+    y = ImageChops.subtract(y, k)
+    return Image.merge("CMYK", (c, m, y, k))
+
+
+def rgb_zu_cmyk(img: Image.Image) -> Image.Image:
+    """Seitenbild farbmetrisch von sRGB nach CMYK trennen.
+    Neutrale Pixel (schwarzer/grauer Text, Grauflaechen) werden anschliessend
+    rein ueber den K-Kanal aufgebaut - das ICC-Profil wuerde dort sonst ein
+    Vierfarb-Schwarz ansetzen, das auf dem Fiery unscharf druckt."""
+    transform = _baue_cmyk_transform() if COLOR_ICC else None
+    if transform is None:
+        return _rgb_zu_cmyk_gcr(img)
+    cmyk = ImageCms.applyTransform(img, transform)
+    r, g, b = img.split()
+    abstand = ImageChops.lighter(
+        ImageChops.lighter(ImageChops.difference(r, g),
+                           ImageChops.difference(g, b)),
+        ImageChops.difference(r, b))
+    neutral = abstand.point(lambda v: 255 if v <= NEUTRAL_TOLERANZ else 0)
+    rein_k = ImageChops.invert(img.convert("L"))
+    nichts = Image.new("L", img.size, 0)
+    c, m, y, k = cmyk.split()
+    c = Image.composite(nichts, c, neutral)
+    m = Image.composite(nichts, m, neutral)
+    y = Image.composite(nichts, y, neutral)
+    k = Image.composite(rein_k, k, neutral)
+    return Image.merge("CMYK", (c, m, y, k))
+
+
+def _devicecmyk_statt_icc(doc) -> None:
+    """PyMuPDF haengt eingefuegten CMYK-JPEGs ungefragt sein eingebautes
+    'Artifex CMYK SWOP'-Profil als ICCBased-Farbraum an. Folgen: Acrobat und
+    der Fiery rechnen die Farben durch dieses fremde Profil (Blaustich) und
+    ICCBased kann am Fiery den Mehrfachdruck-Pfad ausloesen (INSTALLATION.txt
+    Schritt 6). Daher hier auf /DeviceCMYK umschreiben - die verwaisten
+    ICC-Objekte raeumt save(garbage=4) ab."""
+    for xref in range(1, doc.xref_length()):
+        if doc.xref_get_key(xref, "Subtype")[1] != "/Image":
+            continue
+        typ, wert = doc.xref_get_key(xref, "ColorSpace")
+        if typ == "xref":
+            cs_text = doc.xref_object(int(wert.split()[0]), compressed=True)
+        elif typ == "array":
+            cs_text = wert
+        else:
+            continue
+        m = re.search(r"/ICCBased\s+(\d+)\s+\d+\s+R", cs_text)
+        if not m:
+            continue
+        if doc.xref_get_key(int(m.group(1)), "N")[1] == "4":
+            doc.xref_set_key(xref, "ColorSpace", "/DeviceCMYK")
+
+
+# ============================================================
 # PDF-Verarbeitung
 # ============================================================
 
@@ -366,24 +493,7 @@ def build_broschuere(src_pdf: Path, out_pdf: Path, antrag_pages: int) -> None:
                 elif i < gs_start_idx and RASTERIZE_COLOR_PAGES:
                     pix = page.get_pixmap(dpi=COLOR_DPI)
                     img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-                    # RGB -> CMYK: gemeinsamen Grauanteil (anteilig per
-                    # COLOR_GCR_STRENGTH) in den K-Kanal legen, damit Schwarz/Text mit
-                    # Schwarz-Toner druckt (nicht aus 300% C+M+Y, was matschig/graeulich
-                    # wird). Saturierte Farben bleiben weitgehend unveraendert.
-                    r, g, b = img.split()
-                    c = ImageChops.invert(r)
-                    m = ImageChops.invert(g)
-                    y = ImageChops.invert(b)
-                    # GCR mit COLOR_GCR_STRENGTH: nur ein Teil des Grauanteils in K
-                    # verschieben. Volle GCR (1.0) liess Drucke blass wirken, weil der
-                    # Fiery fuer CMY-gemischte Tiefen kalibriert ist; 0.8 haelt genug
-                    # CMY-Anteil fuer Koerper/Saettigung, K macht Text/Schwarz scharf.
-                    k_full = ImageChops.darker(ImageChops.darker(c, m), y)
-                    k = k_full.point(lambda v: int(v * COLOR_GCR_STRENGTH))
-                    c = ImageChops.subtract(c, k)
-                    m = ImageChops.subtract(m, k)
-                    y = ImageChops.subtract(y, k)
-                    cmyk = Image.merge("CMYK", (c, m, y, k))
+                    cmyk = rgb_zu_cmyk(img)
                     buf = io.BytesIO()
                     cmyk.save(buf, format="JPEG", quality=COLOR_JPG_QUALITY,
                               subsampling=0)
@@ -416,6 +526,9 @@ def build_broschuere(src_pdf: Path, out_pdf: Path, antrag_pages: int) -> None:
                 target_rect = fitz.Rect(*LOGO_TARGET_RECT)
                 out[0].insert_image(target_rect, pixmap=pix,
                                     keep_proportion=True)
+
+        # CMYK-Bilder von PyMuPDFs SWOP-ICC-Tag befreien (siehe Funktion).
+        _devicecmyk_statt_icc(out)
 
         out.save(out_pdf, garbage=4, deflate=True)
         out.close()
